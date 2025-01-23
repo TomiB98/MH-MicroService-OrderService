@@ -6,18 +6,21 @@ import com.example.order_service.models.OrderStatus;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class OrderDTO {
 
     private Long id;
     private Long userId;
-    private List<OrderItemEntity> orderItemList = new ArrayList<>();
+    private List<OrderItemDTO> orderItemList = new ArrayList<>();
     private OrderStatus status;
 
     public OrderDTO(OrderEntity order) {
         id = order.getId();
         userId = order.getUserId();
-        orderItemList = order.getOrderItemList();
+        orderItemList = order.getOrderItemList().stream()
+                .map(OrderItemDTO::new)
+                .collect(Collectors.toList());
         status = order.getStatus();
     }
 
@@ -29,7 +32,7 @@ public class OrderDTO {
         return userId;
     }
 
-    public List<OrderItemEntity> getOrderItemList() {
+    public List<OrderItemDTO> getOrderItemList() {
         return orderItemList;
     }
 

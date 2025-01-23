@@ -1,5 +1,6 @@
 package com.example.order_service.models;
 
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 
 import java.util.ArrayList;
@@ -15,6 +16,7 @@ public class OrderEntity {
     private Long userId;
 
     @OneToMany(mappedBy = "order",cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonManagedReference
     private List<OrderItemEntity> orderItemList = new ArrayList<>();
 
     @Enumerated(EnumType.STRING)

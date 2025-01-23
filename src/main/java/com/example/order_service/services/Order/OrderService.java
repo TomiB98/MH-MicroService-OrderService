@@ -14,7 +14,7 @@ public interface OrderService {
 
     OrderEntity getOrderById(Long id) throws NoOrdersFoundException;
     OrderDTO getOrderDTOById(Long id) throws NoOrdersFoundException;
-    List<OrderDTO> getAllOrders() throws NoOrdersFoundException;
+    List<OrderEntity> getAllOrders() throws NoOrdersFoundException;
 
     void createNewOrder (NewOrder newOrder) throws Exception;
     OrderEntity saveOrder(OrderEntity newOrder);

@@ -45,16 +45,11 @@ public class OrderServiceImpl implements OrderService {
 
 
     @Override
-    public List<OrderDTO> getAllOrders() throws NoOrdersFoundException {
-
-        List<OrderDTO> orders = orderRepository.findAll().stream()
-                .map(OrderDTO::new)
-                .collect(Collectors.toList());
-
+    public List<OrderEntity> getAllOrders() throws NoOrdersFoundException {
+        List<OrderEntity> orders = orderRepository.findAll();
         if (orders.isEmpty()) {
-            throw new NoOrdersFoundException("There are no orders.");
+            throw new NoOrdersFoundException("No orders found.");
         }
-
         return orders;
     }
 

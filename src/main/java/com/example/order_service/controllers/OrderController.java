@@ -7,11 +7,15 @@ import com.example.order_service.exceptions.NoOrdersFoundException;
 import com.example.order_service.exceptions.StatusException;
 import com.example.order_service.exceptions.StockException;
 import com.example.order_service.exceptions.UserIdNullException;
+import com.example.order_service.models.OrderEntity;
 import com.example.order_service.services.Order.OrderService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/order")
@@ -42,17 +46,19 @@ public class OrderController {
     }
 
     @GetMapping("/orders")
-    public ResponseEntity<?> getAllOrders() throws NoOrdersFoundException {
-
+    public ResponseEntity<?> getAllOrders() {
         try {
-            return ResponseEntity.ok(orderService.getAllOrders());
+            List<OrderEntity> orders = orderService.getAllOrders();
+            List<OrderDTO> orderDTOs = orders.stream()
+                    .map(OrderDTO::new)
+                    .collect(Collectors.toList());
+            return ResponseEntity.ok(orderDTOs);
 
         } catch (NoOrdersFoundException e) {
             return new ResponseEntity<>(e.getMessage(), HttpStatus.NOT_FOUND);
 
         } catch (Exception e) {
-            return new ResponseEntity<>("An error occurred while searching the orders data, try again later.", HttpStatus.INTERNAL_SERVER_ERROR);
-
+            return new ResponseEntity<>("An error occurred while fetching the orders, try again later.", HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 
