@@ -20,4 +20,9 @@ public class ExceptionHandlers {
     public ResponseEntity<String> orderExceptionHandler(UserIdNullException userIdNullException){
         return new ResponseEntity<>(userIdNullException.getMessage(), HttpStatus.NOT_FOUND);
     }
+
+    @ExceptionHandler(StockException.class)
+    public ResponseEntity<String> orderExceptionHandler(StockException stockException){
+        return new ResponseEntity<>(stockException.getMessage(), HttpStatus.BAD_REQUEST);
+    }
 }

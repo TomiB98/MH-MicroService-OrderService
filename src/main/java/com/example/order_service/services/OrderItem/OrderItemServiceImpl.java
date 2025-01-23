@@ -12,6 +12,8 @@ import com.example.order_service.repositories.OrderItemRepository;
 import com.example.order_service.repositories.OrderRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -24,6 +26,7 @@ public class OrderItemServiceImpl implements OrderItemService {
 
     @Autowired
     private OrderRepository orderRepository;
+
 
     @Override
     public OrderItemEntity getOrderItemById(Long id) throws NoOrdersFoundException {
@@ -53,9 +56,10 @@ public class OrderItemServiceImpl implements OrderItemService {
 
     @Override
     public void createNewOrderItem(NewOrderItem newOrderItem) throws Exception {
-        //validateNewOrder(newOrder);
+
         OrderEntity order = orderRepository.findById(newOrderItem.orderId())
                 .orElseThrow(() -> new NoOrdersFoundException("Order with ID " + newOrderItem.orderId() + " not found."));
+
         OrderItemEntity orderItem = new OrderItemEntity(order, newOrderItem.productId(), newOrderItem.quantity());
         saveOrderItem(orderItem);
     }

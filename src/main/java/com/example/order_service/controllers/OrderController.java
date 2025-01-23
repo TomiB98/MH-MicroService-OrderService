@@ -5,6 +5,7 @@ import com.example.order_service.dtos.OrderDTO;
 import com.example.order_service.dtos.UpdateOrder;
 import com.example.order_service.exceptions.NoOrdersFoundException;
 import com.example.order_service.exceptions.StatusException;
+import com.example.order_service.exceptions.StockException;
 import com.example.order_service.exceptions.UserIdNullException;
 import com.example.order_service.services.Order.OrderService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,7 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/oder")
+@RequestMapping("/api/order")
 public class OrderController {
 
     @Autowired
@@ -62,8 +63,8 @@ public class OrderController {
             orderService.createNewOrder(newOrder);
             return new ResponseEntity<>("Order crated succesfully", HttpStatus.CREATED);
 
-        } catch ( UserIdNullException e) {
-            return new ResponseEntity<>(e.getMessage(), HttpStatus.NOT_FOUND);
+        } catch (UserIdNullException | NoOrdersFoundException | StockException | StatusException e) {
+            return new ResponseEntity<>(e.getMessage(), HttpStatus.BAD_REQUEST);
 
         } catch (Exception e) {
             return new ResponseEntity<>("An error occurred while creating the order, try again later.", HttpStatus.INTERNAL_SERVER_ERROR);
