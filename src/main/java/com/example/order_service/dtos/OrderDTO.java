@@ -1,7 +1,6 @@
 package com.example.order_service.dtos;
 
 import com.example.order_service.models.OrderEntity;
-import com.example.order_service.models.OrderItemEntity;
 import com.example.order_service.models.OrderStatus;
 
 import java.util.ArrayList;
@@ -14,6 +13,7 @@ public class OrderDTO {
     private Long userId;
     private List<OrderItemDTO> orderItemList = new ArrayList<>();
     private OrderStatus status;
+    private Double orderTotal;
 
     public OrderDTO(OrderEntity order) {
         id = order.getId();
@@ -21,6 +21,7 @@ public class OrderDTO {
         orderItemList = order.getOrderItemList().stream()
                 .map(OrderItemDTO::new)
                 .collect(Collectors.toList());
+        orderTotal = orderTotal;
         status = order.getStatus();
     }
 
@@ -38,5 +39,9 @@ public class OrderDTO {
 
     public OrderStatus getStatus() {
         return status;
+    }
+
+    public Double getOrderTotal() {
+        return orderTotal;
     }
 }

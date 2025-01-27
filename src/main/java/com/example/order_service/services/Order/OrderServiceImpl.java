@@ -1,9 +1,6 @@
 package com.example.order_service.services.Order;
 
-import com.example.order_service.dtos.NewOrder;
-import com.example.order_service.dtos.NewOrderItem;
-import com.example.order_service.dtos.OrderDTO;
-import com.example.order_service.dtos.UpdateOrder;
+import com.example.order_service.dtos.*;
 import com.example.order_service.exceptions.NoOrdersFoundException;
 import com.example.order_service.exceptions.StatusException;
 import com.example.order_service.exceptions.StockException;
@@ -12,13 +9,13 @@ import com.example.order_service.models.OrderEntity;
 import com.example.order_service.models.OrderItemEntity;
 import com.example.order_service.models.OrderStatus;
 import com.example.order_service.repositories.OrderRepository;
+import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 public class OrderServiceImpl implements OrderService {
@@ -55,6 +52,37 @@ public class OrderServiceImpl implements OrderService {
 
 
     @Override
+    public List<UserOrderDTO> getAllUserOrders(Long userId) throws NoOrdersFoundException {
+        List<OrderEntity> userOrders = orderRepository.findByUserId(userId);
+        if (userOrders.isEmpty()) {
+            throw new NoOrdersFoundException("No orders found for user ID: " + userId);
+        }
+        // Obtener email del usuario desde user-service
+        String userEmail = getUserEmail(userId);
+
+        return userOrders.stream().map(order -> {
+            List<UserOrderItemDTO> orderItems = order.getOrderItemList().stream()
+                    .map(this::getProductDetails)
+                    .toList();
+            return new UserOrderDTO(order.getId(), userEmail, order.getOrderTotal(), order.getStatus().name(), orderItems);
+        }).toList();
+    }
+
+    private String getUserEmail(Long id) {
+        return restTemplate.getForObject(USER_SERVICE_URL + "/email"+ "/" + id, String.class);
+    }
+
+    private UserOrderItemDTO getProductDetails(OrderItemEntity orderItem) {
+        // Obtener detalles del producto (nombre y precio)
+        String productName = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/name" + "/" + orderItem.getProductId(), String.class);
+        Double productPrice = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/price" + "/" + orderItem.getProductId(), Double.class);
+
+        return new UserOrderItemDTO(orderItem.getProductId(), productName, productPrice, orderItem.getQuantity());
+    }
+
+
+    @Override
+    @Transactional
     public void createNewOrder(NewOrder newOrder) throws Exception {
         try {
             validateNewOrder(newOrder);
@@ -67,8 +95,9 @@ public class OrderServiceImpl implements OrderService {
                 validateOrderItemsStock(item);
             }
 
+            Double orderTotal = orderTotalCalculator(newOrder);
             OrderStatus status = OrderStatus.valueOf(newOrder.status());
-            OrderEntity order = new OrderEntity(newOrder.userId(), status);
+            OrderEntity order = new OrderEntity(newOrder.userId(), status, orderTotal);
 
             // Lista de items de la orden
             List<OrderItemEntity> orderItems = newOrder.orderItems().stream()
@@ -95,6 +124,27 @@ public class OrderServiceImpl implements OrderService {
         }
     }
 
+    private Double orderTotalCalculator(NewOrder newOrder) {
+        Double count = 0.00;
+
+        for (NewOrderItem item : newOrder.orderItems()) {
+            Double productPrice = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/price" + "/" + item.productId(), Double.class);
+            count += productPrice * item.quantity();
+        }
+        return count;
+    }
+
+    private void validateOrderItemsStock(NewOrderItem item) throws StockException {
+        Integer stock = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/stock/" + item.productId(), Integer.class);
+        if (stock == null) {
+            throw new StockException("Stock information not available for product with ID " + item.productId());
+        }
+
+        if (stock < item.quantity()) {
+            throw new StockException("Not enough stock for product ID " + item.productId() + ". Available: " + stock + ", Requested: " + item.quantity());
+        }
+    }
+
     private boolean userExists(Long userId) throws NoOrdersFoundException {
         try {
             restTemplate.getForObject(USER_SERVICE_URL + "/" + userId, String.class);
@@ -107,17 +157,6 @@ public class OrderServiceImpl implements OrderService {
         } catch (Exception e) {
             throw new RuntimeException("An error occurred while checking user existence: " + e.getMessage());
 
-        }
-    }
-
-    private void validateOrderItemsStock(NewOrderItem item) throws StockException {
-        Integer stock = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/stock/" + item.productId(), Integer.class);
-        if (stock == null) {
-            throw new StockException("Stock information not available for product with ID " + item.productId());
-        }
-
-        if (stock < item.quantity()) {
-            throw new StockException("Not enough stock for product ID " + item.productId() + ". Available: " + stock + ", Requested: " + item.quantity());
         }
     }
 
