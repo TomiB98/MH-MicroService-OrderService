@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -37,6 +38,7 @@ public class OrderServiceImpl implements OrderService {
 
     private static final String USER_SERVICE_URL = "http://localhost:8081/api/user";
     private static final String PRODUCT_SERVICE_URL = "http://localhost:8082/api/product";
+    private static final String EMAIL_SERVICE_URL = "http://localhost:8084/api/email";
 
     @Override
     public OrderEntity getOrderById(Long id) throws NoOrdersFoundException {
@@ -120,10 +122,21 @@ public class OrderServiceImpl implements OrderService {
             }
 
             // Lanzar una excepción aquí para simular un fallo
-            throw new RuntimeException("Forzando el fallo en la creación de la orden");
+            //throw new RuntimeException("Forzando el fallo en la creación de la orden");
 
-//            order.setOrderItemList(orderItems);
-//            saveOrder(order);
+            order.setOrderItemList(orderItems);
+            saveOrder(order);
+
+            // Obtener detalles de los productos y enviar email
+            List<OrderEmailDTO.OrderItemEmailDTO> emailItems = new ArrayList<>();
+            for (NewOrderItem item : newOrder.orderItems()) {
+                String productName = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/name/" + item.productId(), String.class);
+                Double productPrice = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/price/" + item.productId(), Double.class);
+                emailItems.add(new OrderEmailDTO.OrderItemEmailDTO(productName, productPrice, item.quantity()));
+            }
+
+            OrderEmailDTO emailDTO = new OrderEmailDTO(newOrder.userId(), emailItems, orderTotal);
+            restTemplate.postForEntity(EMAIL_SERVICE_URL + "/order", emailDTO, Void.class);
 
         } catch (HttpClientErrorException.NotFound e) {
             throw new NoOrdersFoundException("Product not found: " + e.getResponseBodyAsString());
