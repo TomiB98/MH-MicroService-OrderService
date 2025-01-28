@@ -8,14 +8,18 @@ import com.example.order_service.exceptions.UserIdNullException;
 import com.example.order_service.models.OrderEntity;
 import com.example.order_service.models.OrderItemEntity;
 import com.example.order_service.models.OrderStatus;
+import com.example.order_service.rabbitmq.RabbitMQProducer;
 import com.example.order_service.repositories.OrderRepository;
 import jakarta.transaction.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class OrderServiceImpl implements OrderService {
@@ -25,6 +29,11 @@ public class OrderServiceImpl implements OrderService {
 
     @Autowired
     private RestTemplate restTemplate;
+
+    @Autowired
+    private RabbitMQProducer rabbitMQProducer;
+
+    private static final Logger logger = LoggerFactory.getLogger(OrderService.class);
 
     private static final String USER_SERVICE_URL = "http://localhost:8081/api/user";
     private static final String PRODUCT_SERVICE_URL = "http://localhost:8082/api/product";
@@ -107,10 +116,14 @@ public class OrderServiceImpl implements OrderService {
             // Reducir el stock de cada item
             for (NewOrderItem item : newOrder.orderItems()) {
                 reduceStock(item.productId(), item.quantity());
+                logger.info("Stock reducido para producto ID: {} con cantidad: {}", item.productId(), item.quantity());
             }
 
-            order.setOrderItemList(orderItems);
-            saveOrder(order);
+            // Lanzar una excepción aquí para simular un fallo
+            throw new RuntimeException("Forzando el fallo en la creación de la orden");
+
+//            order.setOrderItemList(orderItems);
+//            saveOrder(order);
 
         } catch (HttpClientErrorException.NotFound e) {
             throw new NoOrdersFoundException("Product not found: " + e.getResponseBodyAsString());
@@ -119,10 +132,17 @@ public class OrderServiceImpl implements OrderService {
             throw e;
 
         } catch (Exception e) {
+            // Enviar mensaje a RabbitMQ para notificar error en la creación de la orden
+            logger.error("Error al crear la orden, enviando mensaje a RabbitMQ para revertir el stock", e);
+            for (NewOrderItem item : newOrder.orderItems()) {
+                rabbitMQProducer.sendRollbackMessage(item.productId(), item.quantity());
+                logger.info("Mensaje enviado a RabbitMQ para revertir stock, producto ID: {} cantidad: {}", item.productId(), item.quantity());
+            }
             throw new RuntimeException("An error occurred while creating the order: " + e.getMessage(), e);
 
         }
     }
+
 
     private Double orderTotalCalculator(NewOrder newOrder) {
         Double count = 0.00;
