@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
@@ -102,8 +103,15 @@ public class OrderServiceImpl implements OrderService {
                 throw new NoOrdersFoundException("User with ID " + newOrder.userId() + " not found.");
             }
 
+            List<OrderEmailDTO.OrderItemEmailDTO> emailItems = new ArrayList<>();
+
             for (NewOrderItem item : newOrder.orderItems()) {
                 validateOrderItemsStock(item);
+
+                String productName = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/name/" + item.productId(), String.class);
+                Double productPrice = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/price/" + item.productId(), Double.class);
+
+                emailItems.add(new OrderEmailDTO.OrderItemEmailDTO(item.productId(), productName, productPrice, item.quantity()));
             }
 
             Double orderTotal = orderTotalCalculator(newOrder);
@@ -127,21 +135,15 @@ public class OrderServiceImpl implements OrderService {
             order.setOrderItemList(orderItems);
             saveOrder(order);
 
-            // Obtener detalles de los productos y enviar email
-            List<OrderEmailDTO.OrderItemEmailDTO> emailItems = new ArrayList<>();
-            for (NewOrderItem item : newOrder.orderItems()) {
-                String productName = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/name/" + item.productId(), String.class);
-                Double productPrice = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/price/" + item.productId(), Double.class);
-                emailItems.add(new OrderEmailDTO.OrderItemEmailDTO(productName, productPrice, item.quantity()));
-            }
-
-            OrderEmailDTO emailDTO = new OrderEmailDTO(newOrder.userId(), emailItems, orderTotal);
-            restTemplate.postForEntity(EMAIL_SERVICE_URL + "/order", emailDTO, Void.class);
+            OrderEmailDTO orderEmailDTO = new OrderEmailDTO(newOrder.userId(), orderTotal, emailItems);
+            rabbitMQProducer.sendOrderEmail(orderEmailDTO);
 
         } catch (HttpClientErrorException.NotFound e) {
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
             throw new NoOrdersFoundException("Product not found: " + e.getResponseBodyAsString());
 
         } catch (NoOrdersFoundException | StatusException | UserIdNullException | StockException e) {
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
             throw e;
 
         } catch (Exception e) {
