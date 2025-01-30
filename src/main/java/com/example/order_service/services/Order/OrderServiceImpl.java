@@ -21,7 +21,6 @@ import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 public class OrderServiceImpl implements OrderService {
@@ -35,11 +34,12 @@ public class OrderServiceImpl implements OrderService {
     @Autowired
     private RabbitMQProducer rabbitMQProducer;
 
+
     private static final Logger logger = LoggerFactory.getLogger(OrderService.class);
 
     private static final String USER_SERVICE_URL = "http://localhost:8081/api/user";
     private static final String PRODUCT_SERVICE_URL = "http://localhost:8082/api/product";
-    private static final String EMAIL_SERVICE_URL = "http://localhost:8084/api/email";
+    //private static final String EMAIL_SERVICE_URL = "http://localhost:8084/api/email";
 
     @Override
     public OrderEntity getOrderById(Long id) throws NoOrdersFoundException {
@@ -64,28 +64,27 @@ public class OrderServiceImpl implements OrderService {
 
 
     @Override
-    public List<UserOrderDTO> getAllUserOrders(Long userId) throws NoOrdersFoundException {
+    public List<UserOrderDTO> getAllUserOrders(Long userId, String email) throws NoOrdersFoundException {
+        // Retrives all user orders in a list
         List<OrderEntity> userOrders = orderRepository.findByUserId(userId);
+
+        // Verifies if the user has orders
         if (userOrders.isEmpty()) {
             throw new NoOrdersFoundException("No orders found for user ID: " + userId);
         }
-        // Obtener email del usuario desde user-service
-        String userEmail = getUserEmail(userId);
 
+        // Creates the dto with the product details
         return userOrders.stream().map(order -> {
             List<UserOrderItemDTO> orderItems = order.getOrderItemList().stream()
                     .map(this::getProductDetails)
                     .toList();
-            return new UserOrderDTO(order.getId(), userEmail, order.getOrderTotal(), order.getStatus().name(), orderItems);
+            return new UserOrderDTO(order.getId(), email, order.getOrderTotal(), order.getStatus().name(), orderItems);
         }).toList();
     }
 
-    private String getUserEmail(Long id) {
-        return restTemplate.getForObject(USER_SERVICE_URL + "/email"+ "/" + id, String.class);
-    }
-
+    // Retrives product details (name y price) from product-service and creates the dto
     private UserOrderItemDTO getProductDetails(OrderItemEntity orderItem) {
-        // Obtener detalles del producto (nombre y precio)
+
         String productName = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/name" + "/" + orderItem.getProductId(), String.class);
         Double productPrice = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/price" + "/" + orderItem.getProductId(), Double.class);
 
@@ -95,47 +94,54 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional
-    public void createNewOrder(NewOrder newOrder) throws Exception {
+    public void createNewOrder(NewOrder newOrder, String userEmail, Long userId) throws Exception {
         try {
             validateNewOrder(newOrder);
 
-            if (!userExists(newOrder.userId())) {
-                throw new NoOrdersFoundException("User with ID " + newOrder.userId() + " not found.");
-            }
-
+            // Creates The arrayList for OrderItemEmailDTO
             List<OrderEmailDTO.OrderItemEmailDTO> emailItems = new ArrayList<>();
 
+            // Validates if there's enough stock and brings thr products names and prices from product-service, and adds it to emailDTO list
+            Double count = 0.00;
             for (NewOrderItem item : newOrder.orderItems()) {
                 validateOrderItemsStock(item);
 
                 String productName = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/name/" + item.productId(), String.class);
                 Double productPrice = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/price/" + item.productId(), Double.class);
 
+                count += productPrice * item.quantity();
                 emailItems.add(new OrderEmailDTO.OrderItemEmailDTO(item.productId(), productName, productPrice, item.quantity()));
             }
 
-            Double orderTotal = orderTotalCalculator(newOrder);
-            OrderStatus status = OrderStatus.valueOf(newOrder.status());
-            OrderEntity order = new OrderEntity(newOrder.userId(), status, orderTotal);
+            // Calculates order total
+            Double orderTotal = count;
 
-            // Lista de items de la orden
+            // Transforms the status from string to enum
+            OrderStatus status = OrderStatus.valueOf(newOrder.status());
+
+            OrderEntity order = new OrderEntity(userId, status, orderTotal);
+
+            // Creates list of order items in the order
             List<OrderItemEntity> orderItems = newOrder.orderItems().stream()
                     .map(item -> new OrderItemEntity(order, item.productId(), item.quantity()))
                     .toList();
 
-            // Reducir el stock de cada item
+            // Reduce stock for every item in the order
             for (NewOrderItem item : newOrder.orderItems()) {
                 reduceStock(item.productId(), item.quantity());
                 logger.info("Stock reducido para producto ID: {} con cantidad: {}", item.productId(), item.quantity());
             }
 
-            // Lanzar una excepción aquí para simular un fallo
+            // Lanzar una excepción para simular un fallo y devolucion se stock
             //throw new RuntimeException("Forzando el fallo en la creación de la orden");
 
             order.setOrderItemList(orderItems);
             saveOrder(order);
 
-            OrderEmailDTO orderEmailDTO = new OrderEmailDTO(newOrder.userId(), orderTotal, emailItems);
+            // Creates DTO to sent
+            OrderEmailDTO orderEmailDTO = new OrderEmailDTO(userId, userEmail, orderTotal, emailItems);
+
+            // Sends DTO with rabbit to email-service to send the email
             rabbitMQProducer.sendOrderEmail(orderEmailDTO);
 
         } catch (HttpClientErrorException.NotFound e) {
@@ -147,28 +153,18 @@ public class OrderServiceImpl implements OrderService {
             throw e;
 
         } catch (Exception e) {
-            // Enviar mensaje a RabbitMQ para notificar error en la creación de la orden
-            logger.error("Error al crear la orden, enviando mensaje a RabbitMQ para revertir el stock", e);
+            // Sends a message to notify an error while creating the order and revert the stock
+            logger.error("Error creating the order, sending message to RabbitMQ to revert the stock", e);
             for (NewOrderItem item : newOrder.orderItems()) {
                 rabbitMQProducer.sendRollbackMessage(item.productId(), item.quantity());
-                logger.info("Mensaje enviado a RabbitMQ para revertir stock, producto ID: {} cantidad: {}", item.productId(), item.quantity());
+                logger.info("Message sent to RabbitMQ to revert the stock, product ID: {} quantity: {}", item.productId(), item.quantity());
             }
             throw new RuntimeException("An error occurred while creating the order: " + e.getMessage(), e);
 
         }
     }
 
-
-    private Double orderTotalCalculator(NewOrder newOrder) {
-        Double count = 0.00;
-
-        for (NewOrderItem item : newOrder.orderItems()) {
-            Double productPrice = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/price" + "/" + item.productId(), Double.class);
-            count += productPrice * item.quantity();
-        }
-        return count;
-    }
-
+    // Validates if there's enough stock
     private void validateOrderItemsStock(NewOrderItem item) throws StockException {
         Integer stock = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/stock/" + item.productId(), Integer.class);
         if (stock == null) {
@@ -180,21 +176,7 @@ public class OrderServiceImpl implements OrderService {
         }
     }
 
-    private boolean userExists(Long userId) throws NoOrdersFoundException {
-        try {
-            restTemplate.getForObject(USER_SERVICE_URL + "/" + userId, String.class);
-            return true;
-
-        } catch (HttpClientErrorException.NotFound e) {
-            String errorMessage = e.getResponseBodyAsString();
-            throw new NoOrdersFoundException("User not found: " + errorMessage);
-
-        } catch (Exception e) {
-            throw new RuntimeException("An error occurred while checking user existence: " + e.getMessage());
-
-        }
-    }
-
+    // Sends the id and quantity to product-service to reduce stock for every item in the order
     private void reduceStock(Long productId, Integer quantity) throws NoOrdersFoundException {
         try {
             restTemplate.put(PRODUCT_SERVICE_URL + "/" + productId + "/reduce-stock?quantity=" + quantity, null);
@@ -233,10 +215,12 @@ public class OrderServiceImpl implements OrderService {
     }
 
     //Validations
+
     public void validateUpdatedOrder(UpdateOrder updateOrder) throws Exception {
         validateWrongStatus(updateOrder.status());
     }
 
+    // Validates that the status in the order is correct
     public static void validateWrongStatus(String status) throws StatusException {
         if(!status.equals("PENDING") && !status.equals("COMPLETED")) {
             throw new StatusException("Status must only be: PENDING or COMPLETED.");
@@ -245,12 +229,56 @@ public class OrderServiceImpl implements OrderService {
 
     public void validateNewOrder(NewOrder newOrder) throws Exception {
         validateWrongStatus(newOrder.status());
-        validateNullId(newOrder.userId());
     }
 
-    public static void validateNullId(Long userid) throws UserIdNullException {
-        if(userid == null) {
-            throw new UserIdNullException("The user id cant be null.");
-        }
-    }
+
 }
+
+//Double orderTotal = orderTotalCalculator(newOrder);
+
+//Calculates order total
+//    private Double orderTotalCalculator(NewOrder newOrder) {
+//        Double count = 0.00;
+//
+//        for (NewOrderItem item : newOrder.orderItems()) {
+//            Double productPrice = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/price" + "/" + item.productId(), Double.class);
+//            count += productPrice * item.quantity();
+//        }
+//        return count;
+//    }
+
+
+//validateNullId(newOrder.userId());
+
+
+// Validates that the userId is valid
+//    public static void validateNullId(Long userid) throws UserIdNullException {
+//        if(userid == null) {
+//            throw new UserIdNullException("The user id cant be null.");
+//        }
+//    }
+
+
+// Obtener email del usuario desde user-service
+//String userEmail = getUserEmail(userId);
+//    private String getUserEmail(Long id) {
+//        return restTemplate.getForObject(USER_SERVICE_URL + "/email"+ "/" + id, String.class);
+//    }
+
+//            if (!userExists(newOrder.userId())) {
+//                throw new NoOrdersFoundException("User with ID " + newOrder.userId() + " not found.");
+//            }
+//    private boolean userExists(Long userId) throws NoOrdersFoundException {
+//        try {
+//            restTemplate.getForObject(USER_SERVICE_URL + "/" + userId, String.class);
+//            return true;
+//
+//        } catch (HttpClientErrorException.NotFound e) {
+//            String errorMessage = e.getResponseBodyAsString();
+//            throw new NoOrdersFoundException("User not found: " + errorMessage);
+//
+//        } catch (Exception e) {
+//            throw new RuntimeException("An error occurred while checking user existence: " + e.getMessage());
+//
+//        }
+//    }

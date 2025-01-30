@@ -25,4 +25,9 @@ public class ExceptionHandlers {
     public ResponseEntity<String> orderExceptionHandler(StockException stockException){
         return new ResponseEntity<>(stockException.getMessage(), HttpStatus.BAD_REQUEST);
     }
+
+    @ExceptionHandler(NoAccesGrantedException.class)
+    public ResponseEntity<String> orderExceptionHandler(NoAccesGrantedException noAccesGrantedException){
+        return new ResponseEntity<>(noAccesGrantedException.getMessage(), HttpStatus.FORBIDDEN);
+    }
 }

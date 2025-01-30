@@ -4,16 +4,19 @@ import java.util.List;
 
 public class OrderEmailDTO {
     private Long userId;
+    private String email;
     private Double totalAmount;
     private List<OrderItemEmailDTO> items;
 
-    public OrderEmailDTO(Long userId, Double totalAmount, List<OrderItemEmailDTO> items) {
+    public OrderEmailDTO(Long userId, String email, Double totalAmount, List<OrderItemEmailDTO> items) {
         this.userId = userId;
+        this.email = email;
         this.totalAmount = totalAmount;
         this.items = items;
     }
 
     public Long getUserId() { return userId; }
+    public String getUserEmail() { return email; }
     public Double getTotalAmount() { return totalAmount; }
     public List<OrderItemEmailDTO> getItems() { return items; }
 

@@ -17,9 +17,9 @@ public interface OrderService {
     OrderDTO getOrderDTOById(Long id) throws NoOrdersFoundException;
     List<OrderEntity> getAllOrders() throws NoOrdersFoundException;
 
-    List<UserOrderDTO> getAllUserOrders(Long id) throws NoOrdersFoundException;
+    List<UserOrderDTO> getAllUserOrders(Long id, String email) throws NoOrdersFoundException;
 
-    void createNewOrder (NewOrder newOrder) throws Exception;
+    void createNewOrder (NewOrder newOrder, String userEmail, Long userId) throws Exception;
     OrderEntity saveOrder(OrderEntity newOrder);
 
     OrderDTO updateOrderById(UpdateOrder updateOrder, Long id) throws Exception;
