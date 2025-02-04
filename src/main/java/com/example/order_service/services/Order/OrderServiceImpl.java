@@ -11,15 +11,18 @@ import com.example.order_service.models.OrderStatus;
 import com.example.order_service.rabbitmq.RabbitMQProducer;
 import com.example.order_service.repositories.OrderRepository;
 import jakarta.transaction.Transactional;
+import org.aspectj.apache.bcel.generic.ObjectType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.interceptor.TransactionAspectSupport;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 @Service
@@ -35,10 +38,11 @@ public class OrderServiceImpl implements OrderService {
     private RabbitMQProducer rabbitMQProducer;
 
 
-    private static final Logger logger = LoggerFactory.getLogger(OrderService.class);
+    private static final Logger logger = LoggerFactory.getLogger(OrderServiceImpl.class);
 
-    private static final String USER_SERVICE_URL = "http://localhost:8081/api/user";
-    private static final String PRODUCT_SERVICE_URL = "http://localhost:8082/api/product";
+    private static final String PRODUCT_SERVICE_URL = "http://product-service/api/product";
+
+    //private static final String USER_SERVICE_URL = "http://localhost:8081/api/user";
     //private static final String EMAIL_SERVICE_URL = "http://localhost:8084/api/email";
 
     @Override
@@ -75,20 +79,35 @@ public class OrderServiceImpl implements OrderService {
 
         // Creates the dto with the product details
         return userOrders.stream().map(order -> {
-            List<UserOrderItemDTO> orderItems = order.getOrderItemList().stream()
-                    .map(this::getProductDetails)
-                    .toList();
+            List<UserOrderItemDTO> orderItems = getProductDetails(order.getOrderItemList());
             return new UserOrderDTO(order.getId(), email, order.getOrderTotal(), order.getStatus().name(), orderItems);
         }).toList();
     }
 
     // Retrives product details (name y price) from product-service and creates the dto
-    private UserOrderItemDTO getProductDetails(OrderItemEntity orderItem) {
+    private List<UserOrderItemDTO> getProductDetails(List<OrderItemEntity> orderItems) {
 
-        String productName = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/name" + "/" + orderItem.getProductId(), String.class);
-        Double productPrice = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/price" + "/" + orderItem.getProductId(), Double.class);
+        List<Long> productIds = orderItems.stream()
+                .map(OrderItemEntity::getProductId)
+                .toList();
 
-        return new UserOrderItemDTO(orderItem.getProductId(), productName, productPrice, orderItem.getQuantity());
+        ResponseEntity<ProductDetailsDTO[]> response = restTemplate.postForEntity(
+                PRODUCT_SERVICE_URL + "/details",
+                productIds,
+                ProductDetailsDTO[].class
+        );
+
+        List<ProductDetailsDTO> productDetailsList = Arrays.asList(response.getBody());
+
+        // Mapear productos a UserOrderItemDTO
+        return orderItems.stream().map(orderItem -> {
+            ProductDetailsDTO product = productDetailsList.stream()
+                    .filter(p -> p.getId().equals(orderItem.getProductId()))
+                    .findFirst()
+                    .orElseThrow(() -> new RuntimeException("Product not found for ID: " + orderItem.getProductId()));
+
+            return new UserOrderItemDTO(orderItem.getProductId(), product.getName(), product.getProductprice(), orderItem.getQuantity());
+        }).toList();
     }
 
 
@@ -101,16 +120,41 @@ public class OrderServiceImpl implements OrderService {
             // Creates The arrayList for OrderItemEmailDTO
             List<OrderEmailDTO.OrderItemEmailDTO> emailItems = new ArrayList<>();
 
+            List<Long> productIds = newOrder.orderItems().stream()
+                    .map(NewOrderItem::productId)
+                    .toList();
+
+            ResponseEntity<ProductDetailsDTO[]> response = restTemplate.postForEntity(
+                    PRODUCT_SERVICE_URL + "/details",
+                    productIds,
+                    ProductDetailsDTO[].class
+            );
+
+            List<ProductDetailsDTO> productDetailsList = Arrays.asList(response.getBody());
+
             // Validates if there's enough stock and brings thr products names and prices from product-service, and adds it to emailDTO list
             Double count = 0.00;
             for (NewOrderItem item : newOrder.orderItems()) {
-                validateOrderItemsStock(item);
+                //validateOrderItemsStock(item);
 
-                String productName = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/name/" + item.productId(), String.class);
-                Double productPrice = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/price/" + item.productId(), Double.class);
+                ProductDetailsDTO product = productDetailsList.stream()
+                        .filter(p -> p.getId().equals(item.productId()))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("Product not found for ID: " + item.productId()));
 
-                count += productPrice * item.quantity();
-                emailItems.add(new OrderEmailDTO.OrderItemEmailDTO(item.productId(), productName, productPrice, item.quantity()));
+                validateOrderItemsStock(product.getStock(), item);
+
+                // Calcular el precio total
+                count += product.getProductprice() * item.quantity();
+
+                // Agregar el ítem de la orden al DTO para el email
+                emailItems.add(new OrderEmailDTO.OrderItemEmailDTO(item.productId(), product.getName(), product.getProductprice(), item.quantity()));
+
+//                String productName = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/name/" + item.productId(), String.class);
+//                Double productPrice = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/price/" + item.productId(), Double.class);
+//
+//                count += productPrice * item.quantity();
+//                emailItems.add(new OrderEmailDTO.OrderItemEmailDTO(item.productId(), productName, productPrice, item.quantity()));
             }
 
             // Calculates order total
@@ -165,8 +209,8 @@ public class OrderServiceImpl implements OrderService {
     }
 
     // Validates if there's enough stock
-    private void validateOrderItemsStock(NewOrderItem item) throws StockException {
-        Integer stock = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/stock/" + item.productId(), Integer.class);
+    private void validateOrderItemsStock(Integer stock, NewOrderItem item) throws StockException {
+        //Integer stock = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/stock/" + item.productId(), Integer.class);
         if (stock == null) {
             throw new StockException("Stock information not available for product with ID " + item.productId());
         }
@@ -233,6 +277,25 @@ public class OrderServiceImpl implements OrderService {
 
 
 }
+
+//        ProductDetailsDTO productDetails = restTemplate.getForObject(
+//                PRODUCT_SERVICE_URL + "/" + orderItem.getProductId(),
+//                ProductDetailsDTO.class);
+//        String productName = restTemplate.getForObject(
+//                PRODUCT_SERVICE_URL + "/name/" + orderItem.getProductId(),
+//                String.class);
+//
+//        Double productPrice = restTemplate.getForObject(
+//                PRODUCT_SERVICE_URL + "/price/" + orderItem.getProductId(),
+//                Double.class);
+//        System.out.println(productNameAndPrice);
+
+//        String productName = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/name" + "/" + orderItem.getProductId(), String.class);
+//        Double productPrice = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/price" + "/" + orderItem.getProductId(), Double.class);
+
+//return new UserOrderItemDTO(orderItem.getProductId(), productDetails.getName(), productDetails.getProductprice(), orderItem.getQuantity());
+
+
 
 //Double orderTotal = orderTotalCalculator(newOrder);
 
