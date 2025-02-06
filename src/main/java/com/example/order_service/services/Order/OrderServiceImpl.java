@@ -42,9 +42,6 @@ public class OrderServiceImpl implements OrderService {
 
     private static final String PRODUCT_SERVICE_URL = "http://product-service/api/product";
 
-    //private static final String USER_SERVICE_URL = "http://localhost:8081/api/user";
-    //private static final String EMAIL_SERVICE_URL = "http://localhost:8084/api/email";
-
     @Override
     public OrderEntity getOrderById(Long id) throws NoOrdersFoundException {
         return orderRepository.findById(id).orElseThrow( () -> new NoOrdersFoundException("Order with ID " + id + " not found."));
@@ -150,11 +147,6 @@ public class OrderServiceImpl implements OrderService {
                 // Agregar el ítem de la orden al DTO para el email
                 emailItems.add(new OrderEmailDTO.OrderItemEmailDTO(item.productId(), product.getName(), product.getProductprice(), item.quantity()));
 
-//                String productName = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/name/" + item.productId(), String.class);
-//                Double productPrice = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/price/" + item.productId(), Double.class);
-//
-//                count += productPrice * item.quantity();
-//                emailItems.add(new OrderEmailDTO.OrderItemEmailDTO(item.productId(), productName, productPrice, item.quantity()));
             }
 
             // Calculates order total
@@ -171,10 +163,8 @@ public class OrderServiceImpl implements OrderService {
                     .toList();
 
             // Reduce stock for every item in the order
-            for (NewOrderItem item : newOrder.orderItems()) {
-                reduceStock(item.productId(), item.quantity());
-                logger.info("Stock reducido para producto ID: {} con cantidad: {}", item.productId(), item.quantity());
-            }
+            reduceStock(newOrder.orderItems());
+            logger.info("Stock reduced for all the products of the order");
 
             // Lanzar una excepción para simular un fallo y devolucion se stock
             //throw new RuntimeException("Forzando el fallo en la creación de la orden");
@@ -210,7 +200,7 @@ public class OrderServiceImpl implements OrderService {
 
     // Validates if there's enough stock
     private void validateOrderItemsStock(Integer stock, NewOrderItem item) throws StockException {
-        //Integer stock = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/stock/" + item.productId(), Integer.class);
+
         if (stock == null) {
             throw new StockException("Stock information not available for product with ID " + item.productId());
         }
@@ -220,10 +210,21 @@ public class OrderServiceImpl implements OrderService {
         }
     }
 
-    // Sends the id and quantity to product-service to reduce stock for every item in the order
-    private void reduceStock(Long productId, Integer quantity) throws NoOrdersFoundException {
+    // Sends a dto with the id and quantity of every product to product-service to reduce stock for every item in the order
+    private void reduceStock(List<NewOrderItem> orderItems) throws NoOrdersFoundException {
         try {
-            restTemplate.put(PRODUCT_SERVICE_URL + "/" + productId + "/reduce-stock?quantity=" + quantity, null);
+            // Convert the list of NewOrderItem to ProductStockUpdate
+            List<ProductStockUpdate> stockUpdates = orderItems.stream()
+                    .map(item -> new ProductStockUpdate(item.productId(), item.quantity()))
+                    .toList();
+
+            // Load stockUpdates into ReduceStockRequest
+            ReduceStockRequest request = new ReduceStockRequest(stockUpdates);
+
+            // Send the request in one petition to reduce stock
+            restTemplate.put(PRODUCT_SERVICE_URL + "/reduce-stock", request);
+
+            logger.info("Stock reduced for products: {}", stockUpdates);
 
         } catch (HttpClientErrorException.NotFound e) {
             throw new NoOrdersFoundException("Product not found: " + e.getResponseBodyAsString());
@@ -275,8 +276,36 @@ public class OrderServiceImpl implements OrderService {
         validateWrongStatus(newOrder.status());
     }
 
-
 }
+
+//private static final String USER_SERVICE_URL = "http://localhost:8081/api/user";
+//private static final String EMAIL_SERVICE_URL = "http://localhost:8084/api/email";
+
+//            for (NewOrderItem item : newOrder.orderItems()) {
+//                reduceStock(item.productId(), item.quantity());
+//                logger.info("Stock reducido para producto ID: {} con cantidad: {}", item.productId(), item.quantity());
+//            }
+
+//    private void reduceStock(Long productId, Integer quantity) throws NoOrdersFoundException {
+//        try {
+//            restTemplate.put(PRODUCT_SERVICE_URL + "/" + productId + "/reduce-stock?quantity=" + quantity, null);
+//
+//        } catch (HttpClientErrorException.NotFound e) {
+//            throw new NoOrdersFoundException("Product not found: " + e.getResponseBodyAsString());
+//
+//        } catch (Exception e) {
+//            throw new RuntimeException("Error while reducing product stock: " + e.getMessage());
+//
+//        }
+//    }
+
+//                String productName = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/name/" + item.productId(), String.class);
+//                Double productPrice = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/price/" + item.productId(), Double.class);
+//
+//                count += productPrice * item.quantity();
+//                emailItems.add(new OrderEmailDTO.OrderItemEmailDTO(item.productId(), productName, productPrice, item.quantity()));
+
+//Integer stock = restTemplate.getForObject(PRODUCT_SERVICE_URL + "/stock/" + item.productId(), Integer.class);
 
 //        ProductDetailsDTO productDetails = restTemplate.getForObject(
 //                PRODUCT_SERVICE_URL + "/" + orderItem.getProductId(),
